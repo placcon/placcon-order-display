@@ -4,9 +4,18 @@ const fs = require('fs');
 
 // Keep a global reference of the window object
 let mainWindow;
+let keepAliveInterval;
+let lastActivityTime = Date.now();
+let isRecovering = false;
 
 // Settings file path
 const settingsPath = path.join(app.getPath('userData'), 'display-settings.json');
+const windowStatePath = path.join(app.getPath('userData'), 'window-state.json');
+
+// Keep-alive configuration
+const KEEP_ALIVE_INTERVAL = 30000; // 30 seconds
+const INACTIVITY_TIMEOUT = 300000; // 5 minutes
+const RECOVERY_CHECK_INTERVAL = 60000; // 1 minute
 
 // Load display settings
 function loadDisplaySettings() {
@@ -28,6 +37,38 @@ function saveDisplaySettings(settings) {
     console.log('Display settings saved:', settings);
   } catch (error) {
     console.error('Error saving display settings:', error);
+  }
+}
+
+// Load window state
+function loadWindowState() {
+  try {
+    if (fs.existsSync(windowStatePath)) {
+      const state = JSON.parse(fs.readFileSync(windowStatePath, 'utf8'));
+      return state;
+    }
+  } catch (error) {
+    console.error('Error loading window state:', error);
+  }
+  return null;
+}
+
+// Save window state
+function saveWindowState() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+  
+  try {
+    const state = {
+      bounds: mainWindow.getBounds(),
+      isFullScreen: mainWindow.isFullScreen(),
+      isMaximized: mainWindow.isMaximized(),
+      timestamp: Date.now()
+    };
+    fs.writeFileSync(windowStatePath, JSON.stringify(state, null, 2));
+  } catch (error) {
+    console.error('Error saving window state:', error);
   }
 }
 
@@ -57,6 +98,9 @@ function createWindow() {
   const targetDisplay = displays[settings.displayIndex] || displays[0];
   console.log('Using display:', targetDisplay.label);
   
+  // Reset recovery flag
+  isRecovering = false;
+  
   // Create the browser window
   mainWindow = new BrowserWindow({
     fullscreen: true,
@@ -68,17 +112,34 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      preload: path.join(__dirname, 'preload-simple.js')
+      preload: path.join(__dirname, 'preload-simple.js'),
+      backgroundThrottling: false, // Prevent background throttling
+      webSecurity: true,
+      allowRunningInsecureContent: false
     },
     icon: path.join(__dirname, 'assets', 'icon.png'),
     title: 'placcon order display',
     show: false, // Don't show until ready
     autoHideMenuBar: true, // Hide menu bar
-    titleBarStyle: 'default'
+    titleBarStyle: 'default',
+    alwaysOnTop: false, // Don't force always on top
+    skipTaskbar: false, // Show in taskbar
+    closable: true, // Allow closing
+    minimizable: false, // Prevent minimizing
+    maximizable: false, // Prevent maximizing
+    resizable: false // Prevent resizing
   });
 
   // Load the Placcon website
   mainWindow.loadURL('https://core.placcon.com');
+  
+  // Track page load start time
+  mainWindow.webContents.on('did-start-loading', () => {
+    console.log('Page started loading...');
+    mainWindow.webContents.executeJavaScript(`
+      window.pageLoadStartTime = Date.now();
+    `);
+  });
 
   // Show window when ready to prevent visual flash
   mainWindow.once('ready-to-show', () => {
@@ -88,6 +149,16 @@ function createWindow() {
   // Inject display selector code after page loads
   mainWindow.webContents.on('did-finish-load', () => {
     console.log('Page finished loading, injecting display selector...');
+    
+    // Reset recovery flag when page loads successfully
+    isRecovering = false;
+    lastActivityTime = Date.now();
+    
+    // Force garbage collection if available
+    if (global.gc) {
+      global.gc();
+      console.log('Garbage collection triggered');
+    }
     
     // Inject the display selector code
     mainWindow.webContents.executeJavaScript(`
@@ -241,7 +312,40 @@ function createWindow() {
 
   // Handle window closed
   mainWindow.on('closed', () => {
+    saveWindowState();
     mainWindow = null;
+    // Clear intervals when window is closed
+    if (keepAliveInterval) {
+      clearInterval(keepAliveInterval);
+      keepAliveInterval = null;
+    }
+  });
+
+  // Save window state periodically
+  setInterval(() => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      saveWindowState();
+    }
+  }, 30000); // Save every 30 seconds
+
+  // Handle window focus events
+  mainWindow.on('focus', () => {
+    console.log('Window focused');
+    lastActivityTime = Date.now();
+  });
+
+  mainWindow.on('blur', () => {
+    console.log('Window blurred');
+  });
+
+  // Handle window show/hide events
+  mainWindow.on('show', () => {
+    console.log('Window shown');
+    lastActivityTime = Date.now();
+  });
+
+  mainWindow.on('hide', () => {
+    console.log('Window hidden');
   });
 
   // Prevent new window creation (block popups)
@@ -271,8 +375,24 @@ function createWindow() {
   // Handle uncaught exceptions in renderer process
   mainWindow.webContents.on('crashed', (event) => {
     console.error('Renderer process crashed:', event);
-    // Reload the window instead of crashing the app
-    mainWindow.reload();
+    // Attempt recovery instead of just reloading
+    attemptRecovery();
+  });
+
+  // Handle renderer process killed
+  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
+    console.error('Page failed to load:', errorCode, errorDescription);
+    // Attempt recovery for failed loads
+    setTimeout(() => {
+      if (isRecovering) return;
+      attemptRecovery();
+    }, 5000);
+  });
+
+  // Handle renderer process unresponsive
+  mainWindow.webContents.on('unresponsive', () => {
+    console.error('Renderer process became unresponsive');
+    attemptRecovery();
   });
 
   // Handle unresponsive renderer
@@ -283,7 +403,239 @@ function createWindow() {
   // Handle responsive renderer
   mainWindow.on('responsive', () => {
     console.log('Window became responsive');
+    lastActivityTime = Date.now();
   });
+
+  // Start keep-alive system
+  startKeepAliveSystem();
+  
+  // Start recovery monitoring
+  startRecoveryMonitoring();
+}
+
+// Keep-alive system to prevent white screen issues
+function startKeepAliveSystem() {
+  // Clear any existing interval
+  if (keepAliveInterval) {
+    clearInterval(keepAliveInterval);
+  }
+
+  keepAliveInterval = setInterval(() => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return;
+    }
+
+    try {
+      // Update activity time
+      lastActivityTime = Date.now();
+      
+      // Send keep-alive ping to renderer
+      mainWindow.webContents.executeJavaScript(`
+        // Keep-alive ping
+        if (window.electronAPI && window.electronAPI.keepAlive) {
+          window.electronAPI.keepAlive();
+        }
+        
+        // Check if page is responsive
+        if (document.readyState === 'complete') {
+          // Page is loaded and responsive
+          console.log('Keep-alive: Page is responsive');
+        } else {
+          console.log('Keep-alive: Page state:', document.readyState);
+        }
+        
+        // Memory management - clear any unnecessary data
+        if (window.performance && window.performance.memory) {
+          const memory = window.performance.memory;
+          if (memory.usedJSHeapSize > 100 * 1024 * 1024) { // 100MB
+            console.log('High memory usage detected:', Math.round(memory.usedJSHeapSize / 1024 / 1024) + 'MB');
+          }
+        }
+      `).catch(error => {
+        console.warn('Keep-alive ping failed:', error.message);
+      });
+      
+    } catch (error) {
+      console.warn('Keep-alive error:', error.message);
+    }
+  }, KEEP_ALIVE_INTERVAL);
+
+  console.log('Keep-alive system started');
+  
+  // Monitor process memory usage
+  setInterval(() => {
+    const memUsage = process.memoryUsage();
+    const memUsageMB = {
+      rss: Math.round(memUsage.rss / 1024 / 1024),
+      heapUsed: Math.round(memUsage.heapUsed / 1024 / 1024),
+      heapTotal: Math.round(memUsage.heapTotal / 1024 / 1024),
+      external: Math.round(memUsage.external / 1024 / 1024)
+    };
+    
+    console.log('Memory usage:', memUsageMB);
+    
+    // If memory usage is too high, trigger garbage collection
+    if (memUsageMB.heapUsed > 200) { // 200MB
+      console.warn('High memory usage detected, triggering garbage collection');
+      if (global.gc) {
+        global.gc();
+      }
+    }
+  }, 60000); // Check every minute
+}
+
+// Recovery monitoring system
+function startRecoveryMonitoring() {
+  setInterval(() => {
+    if (!mainWindow || mainWindow.isDestroyed() || isRecovering) {
+      return;
+    }
+
+    try {
+      // Check if window is responsive
+      if (mainWindow.isDestroyed()) {
+        console.log('Window destroyed, attempting recovery...');
+        attemptRecovery();
+        return;
+      }
+
+      // Check for white screen or unresponsive state
+      mainWindow.webContents.executeJavaScript(`
+        // Check if page is in a bad state
+        const isWhiteScreen = document.body && 
+          (document.body.innerHTML.trim() === '' || 
+           document.body.style.backgroundColor === 'white' ||
+           document.body.style.backgroundColor === '#ffffff');
+        
+        const isUnresponsive = !document.querySelector('body') || 
+          document.readyState !== 'complete';
+        
+        // Check for network connectivity issues
+        const hasNetworkError = document.querySelector('.error-message, .network-error, .offline-indicator') !== null;
+        
+        // Check if page is stuck loading
+        const isStuckLoading = document.readyState === 'loading' && 
+          (Date.now() - window.pageLoadStartTime) > 30000; // 30 seconds
+        
+        // Check for specific Placcon error states
+        const hasPlacconError = document.querySelector('.error-container, .loading-error, .connection-error') !== null;
+        
+        // Check if we're on the correct domain
+        const isCorrectDomain = window.location.hostname === 'core.placcon.com';
+        
+        { 
+          isWhiteScreen, 
+          isUnresponsive, 
+          readyState: document.readyState,
+          hasNetworkError,
+          isStuckLoading,
+          hasPlacconError,
+          isCorrectDomain,
+          url: window.location.href
+        }
+      `).then(result => {
+        if (result && (result.isWhiteScreen || result.isUnresponsive || result.hasNetworkError || result.isStuckLoading || result.hasPlacconError || !result.isCorrectDomain)) {
+          console.log('Detected problematic state:', result);
+          attemptRecovery();
+        }
+      }).catch(error => {
+        console.warn('Recovery check failed:', error.message);
+        // If we can't even execute JavaScript, the window might be in a bad state
+        attemptRecovery();
+      });
+
+    } catch (error) {
+      console.warn('Recovery monitoring error:', error.message);
+    }
+  }, RECOVERY_CHECK_INTERVAL);
+
+  console.log('Recovery monitoring started');
+}
+
+// Attempt to recover from white screen or unresponsive state
+function attemptRecovery() {
+  if (isRecovering) {
+    return; // Already recovering
+  }
+
+  isRecovering = true;
+  console.log('Attempting to recover from white screen...');
+
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      // First try to reload the page
+      console.log('Attempting page reload...');
+      mainWindow.reload();
+      
+      // If reload doesn't work after 15 seconds, recreate the window
+      setTimeout(() => {
+        if (isRecovering) {
+          console.log('Reload failed, recreating window...');
+          recreateWindow();
+        }
+      }, 15000);
+      
+      // Additional check after 5 seconds to see if reload worked
+      setTimeout(() => {
+        if (isRecovering && mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.executeJavaScript(`
+            document.readyState === 'complete' && 
+            document.body && 
+            document.body.innerHTML.trim() !== ''
+          `).then(isHealthy => {
+            if (isHealthy) {
+              console.log('Recovery successful via reload');
+              isRecovering = false;
+            }
+          }).catch(() => {
+            // If we can't check, assume recovery failed
+          });
+        }
+      }, 5000);
+      
+    } else {
+      recreateWindow();
+    }
+  } catch (error) {
+    console.error('Recovery attempt failed:', error.message);
+    recreateWindow();
+  }
+}
+
+// Recreate the window completely
+function recreateWindow() {
+  console.log('Recreating window...');
+  
+  try {
+    // Save current state before destroying
+    saveWindowState();
+    
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.destroy();
+    }
+    
+    // Clear intervals
+    if (keepAliveInterval) {
+      clearInterval(keepAliveInterval);
+      keepAliveInterval = null;
+    }
+    
+    // Create new window after a short delay
+    setTimeout(() => {
+      try {
+        createWindow();
+        console.log('Window recreation completed');
+      } catch (error) {
+        console.error('Failed to create new window:', error.message);
+      } finally {
+        isRecovering = false;
+      }
+    }, 3000);
+    
+  } catch (error) {
+    console.error('Failed to recreate window:', error.message);
+    isRecovering = false;
+  }
 }
 
 // Configure session for persistent storage
@@ -293,6 +645,36 @@ function configureSession() {
     // Add any custom headers if needed
     callback({ requestHeaders: details.requestHeaders });
   });
+  
+  // Configure session for better stability
+  session.defaultSession.setPreloads([]);
+  
+  // Set session permissions
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+    const allowedPermissions = ['notifications', 'media'];
+    if (allowedPermissions.includes(permission)) {
+      callback(true);
+    } else {
+      callback(false);
+    }
+  });
+  
+  // Clear session data periodically to prevent memory issues
+  setInterval(() => {
+    try {
+      session.defaultSession.clearStorageData({
+        storages: ['appcache', 'filesystem', 'indexdb', 'localstorage', 'shadercache', 'websql', 'serviceworkers', 'cachestorage']
+      }).then(() => {
+        console.log('Session storage cleared');
+      }).catch(error => {
+        console.warn('Failed to clear session storage:', error.message);
+      });
+    } catch (error) {
+      console.warn('Session storage clear error:', error.message);
+    }
+  }, 300000); // Clear every 5 minutes
+  
+  console.log('Session configured for stability');
 }
 
 // Get available displays (IPC handler)
@@ -331,6 +713,11 @@ ipcMain.handle('set-display', async (event, displayIndex) => {
 
 // App event handlers
 app.whenReady().then(() => {
+  // Enable garbage collection if available
+  if (process.argv.includes('--expose-gc')) {
+    console.log('Garbage collection enabled');
+  }
+  
   configureSession();
   createWindow();
 
@@ -339,11 +726,59 @@ app.whenReady().then(() => {
       createWindow();
     }
   });
+  
+  // Prevent system sleep
+  if (process.platform === 'darwin') {
+    // macOS: Use powerSaveBlocker
+    const { powerSaveBlocker } = require('electron');
+    const id = powerSaveBlocker.start('prevent-display-sleep');
+    console.log('Power save blocker started:', id);
+  } else if (process.platform === 'win32') {
+    // Windows: Use powerSaveBlocker
+    const { powerSaveBlocker } = require('electron');
+    const id = powerSaveBlocker.start('prevent-display-sleep');
+    console.log('Power save blocker started:', id);
+  }
 });
 
 app.on('window-all-closed', () => {
+  // Clear all intervals
+  if (keepAliveInterval) {
+    clearInterval(keepAliveInterval);
+    keepAliveInterval = null;
+  }
+  
   if (process.platform !== 'darwin') {
     app.quit();
+  }
+});
+
+// Handle app before-quit
+app.on('before-quit', () => {
+  // Save window state
+  saveWindowState();
+  
+  // Clear all intervals
+  if (keepAliveInterval) {
+    clearInterval(keepAliveInterval);
+    keepAliveInterval = null;
+  }
+});
+
+// Handle process errors
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  // Don't exit, try to recover
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    attemptRecovery();
+  }
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  // Don't exit, try to recover
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    attemptRecovery();
   }
 });
 
