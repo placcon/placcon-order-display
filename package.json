@@ -1,11 +1,11 @@
 {
-  "name": "placcon-launcher",
-  "version": "1.11.1",
-  "description": "Placcon Restaurant System Desktop Launcher",
+  "name": "placcon-order-display",
+  "version": "2.3.2-order",
+  "description": "Placcon Order Display System",
   "main": "main.js",
   "scripts": {
-    "start": "electron . --expose-gc",
-    "dev": "electron . --dev --expose-gc",
+    "start": "electron .",
+    "dev": "electron . --dev",
     "build": "electron-builder",
     "build:win": "electron-builder --win",
     "build:mac": "electron-builder --mac",
@@ -19,27 +19,24 @@
   "keywords": [
     "electron",
     "placcon",
-    "restaurant",
-    "launcher"
+    "order-display",
+    "kiosk"
   ],
   "author": "Placcon <info@placcon.com>",
   "license": "MIT",
   "devDependencies": {
-    "electron": "^28.0.0",
+    "electron": "^38.0.0",
     "electron-builder": "^24.9.1"
   },
   "build": {
-    "appId": "com.placcon.launcher",
-    "productName": "Placcon Launcher",
-    "electronVersion": "28.0.0",
+    "appId": "com.placcon.order-display",
+    "productName": "placcon order display",
     "directories": {
       "output": "dist"
     },
     "files": [
       "main.js",
-      "preload-simple.js",
-      "renderer.js",
-      "index.html",
+      "preload.js",
       "assets/**/*"
     ],
     "publish": null,
@@ -87,27 +84,9 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
-    },
-    "extraResources": [
-      {
-        "from": "assets/",
-        "to": "assets/"
-      }
-    ],
-    "protocols": [
-      {
-        "name": "Placcon Launcher",
-        "schemes": ["placcon"]
-      }
-    ]
+    }
   },
   "dependencies": {
-    "@serialport/list": "^13.0.0",
-    "path": "^0.12.7",
-    "serialport": "^13.0.0"
-  },
-  "engines": {
-    "node": ">=20.0.0",
-    "npm": ">=8.0.0"
+    "path": "^0.12.7"
   }
-}
+} 

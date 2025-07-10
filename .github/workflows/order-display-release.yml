@@ -89,7 +89,7 @@ jobs:
         echo "Setting up order display configuration..."
         cp package-order-display.json package.json
         cp main-order-display.js main.js
-        cp preload-simple.js preload.js
+        cp preload.js preload.js
 
     - name: Get version from package.json
       id: get_version
