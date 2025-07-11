@@ -87,9 +87,8 @@ jobs:
     - name: Setup order display files
       run: |
         echo "Setting up order display configuration..."
-        cp package.json package.json
-        cp main.js main.js
-        cp preload.js preload.js
+        # Files are already in the correct order display configuration
+        echo "Order display files are ready for build"
 
     - name: Get version from package.json
       id: get_version
