@@ -1,16 +1,12 @@
-const { app, BrowserWindow, session, ipcMain, screen, powerSaveBlocker, shell } = require('electron');
+const { app, BrowserWindow, session, ipcMain, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
 // Keep a global reference of the window object
 let mainWindow;
-let autoReloadInterval;
-let lastWelcomeCheck = Date.now();
 
 // Settings file path
 const settingsPath = path.join(app.getPath('userData'), 'display-settings.json');
-
-
 
 // Load display settings
 function loadDisplaySettings() {
@@ -35,8 +31,6 @@ function saveDisplaySettings(settings) {
   }
 }
 
-
-
 // Get available displays
 function getAvailableDisplays() {
   const displays = screen.getAllDisplays();
@@ -54,29 +48,6 @@ function getAvailableDisplays() {
   }));
 }
 
-// Helper function to check if a URL is allowed
-function isAllowedUrl(url) {
-  const allowedHosts = [
-    'core.placcon.com',
-    'placcon.com',
-    'www.placcon.com',
-    'localhost',
-    '127.0.0.1'
-  ];
-  
-  try {
-    const parsedUrl = new URL(url);
-    return allowedHosts.some(host => 
-      parsedUrl.hostname === host || 
-      parsedUrl.hostname.endsWith('.' + host) ||
-      host.endsWith('.' + parsedUrl.hostname)
-    );
-  } catch (error) {
-    console.warn('Invalid URL:', url);
-    return false;
-  }
-}
-
 function createWindow() {
   // Load display settings
   const settings = loadDisplaySettings();
@@ -85,9 +56,6 @@ function createWindow() {
   // Get the target display
   const targetDisplay = displays[settings.displayIndex] || displays[0];
   console.log('Using display:', targetDisplay.label);
-  
-  // Reset recovery flag
-  isRecovering = false;
   
   // Create the browser window
   mainWindow = new BrowserWindow({
@@ -100,28 +68,17 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js'),
-      backgroundThrottling: false, // Prevent background throttling
-      webSecurity: true,
-      allowRunningInsecureContent: false
+      preload: path.join(__dirname, 'preload.js')
     },
     icon: path.join(__dirname, 'assets', 'icon.png'),
     title: 'placcon order display',
     show: false, // Don't show until ready
     autoHideMenuBar: true, // Hide menu bar
-    titleBarStyle: 'default',
-    alwaysOnTop: false, // Don't force always on top
-    skipTaskbar: false, // Show in taskbar
-    closable: true, // Allow closing
-    minimizable: false, // Prevent minimizing
-    maximizable: false, // Prevent maximizing
-    resizable: false // Prevent resizing
+    titleBarStyle: 'default'
   });
 
   // Load the Placcon website
   mainWindow.loadURL('https://core.placcon.com');
-  
-
 
   // Show window when ready to prevent visual flash
   mainWindow.once('ready-to-show', () => {
@@ -130,59 +87,29 @@ function createWindow() {
 
   // Inject display selector code after page loads
   mainWindow.webContents.on('did-finish-load', () => {
+    console.log('Page finished loading, injecting display selector...');
     
-          
-    
-            // Inject the display selector code
-  mainWindow.webContents.executeJavaScript(`
-    
-    // Add keyboard shortcut only
-    document.addEventListener('keydown', (event) => {
-      if (event.ctrlKey && event.shiftKey && event.key === 'D') {
-        event.preventDefault();
-        showDisplaySelector();
-      }
-    });
-    
-    // Function to check if we're on welcome screen
-    function isOnWelcomeScreen() {
-      try {
-        const welcomeIndicators = [
-          document.querySelector('.welcome'),
-          document.querySelector('.welcome-screen'),
-          document.querySelector('[data-welcome]'),
-          document.querySelector('.login-form'),
-          document.querySelector('.auth-form'),
-          document.querySelector('.signin-form'),
-          document.querySelector('.login-container'),
-          document.querySelector('.auth-container'),
-          document.querySelector('.welcome-container'),
-          document.querySelector('.welcome-message'),
-          document.querySelector('.login-message')
-        ];
-        const url = window.location.href;
-        const welcomeUrlPatterns = [
-          '/welcome', '/login', '/auth', '/signin', '/sign-in', '/log-in', '/', '/index', '/home'
-        ];
-        const hasWelcomeIndicator = welcomeIndicators.some(indicator => indicator !== null);
-        const hasWelcomeUrl = welcomeUrlPatterns.some(pattern => url.includes(pattern));
-        const isOnMainDomain = url === 'https://core.placcon.com' || 
-                              url === 'https://core.placcon.com/' ||
-                              (url.includes('core.placcon.com') && !url.replace('https://core.placcon.com', '').replace('http://core.placcon.com', '').replace('core.placcon.com', '').replace(/^\//, ''));
-        return hasWelcomeIndicator || hasWelcomeUrl || isOnMainDomain;
-      } catch (e) {
-        console.warn('isOnWelcomeScreen error:', e);
-        return false;
-      }
-    }
-    window.isOnWelcomeScreen = isOnWelcomeScreen;
+    // Inject the display selector code
+    mainWindow.webContents.executeJavaScript(`
+      console.log('Injecting display selector code...');
+      
+      // Add keyboard shortcut only
+      document.addEventListener('keydown', (event) => {
+        if (event.ctrlKey && event.shiftKey && event.key === 'D') {
+          event.preventDefault();
+          console.log('Keyboard shortcut detected');
+          showDisplaySelector();
+        }
+      });
       
       // Display selector function
       async function showDisplaySelector() {
+        console.log('Opening display selector...');
         
         try {
           // Get displays using IPC
           const result = await window.electronAPI.getDisplays();
+          console.log('Displays result:', result);
           
           if (!result.success) {
             alert('Error loading displays: ' + result.error);
@@ -315,14 +242,7 @@ function createWindow() {
   // Handle window closed
   mainWindow.on('closed', () => {
     mainWindow = null;
-    // Clear auto-reload interval
-    if (autoReloadInterval) {
-      clearInterval(autoReloadInterval);
-      autoReloadInterval = null;
-    }
   });
-
-
 
   // Prevent new window creation (block popups)
   mainWindow.webContents.setWindowOpenHandler(() => {
@@ -331,115 +251,39 @@ function createWindow() {
 
   // Handle navigation to external sites
   mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {
-    if (!isAllowedUrl(navigationUrl)) {
+    const parsedUrl = new URL(navigationUrl);
+    if (!parsedUrl.hostname.endsWith('core.placcon.com') && parsedUrl.hostname !== 'display.core.placcon.com') {
       event.preventDefault();
-      // Optionally open in default browser
-      shell.openExternal(navigationUrl);
-    } else {
-      console.log('Allowing navigation to:', navigationUrl);
+      require('electron').shell.openExternal(navigationUrl);
     }
   });
 
   // Handle new window requests
   mainWindow.webContents.on('new-window', (event, navigationUrl) => {
-    event.preventDefault();
-    
-    if (!isAllowedUrl(navigationUrl)) {
-      shell.openExternal(navigationUrl);
-    } else {
-      console.log('Allowing new window to:', navigationUrl);
-      // Load in the same window instead of opening new one
-      mainWindow.loadURL(navigationUrl);
-    }
-  });
-
-  // Handle form submission redirects
-  mainWindow.webContents.on('will-redirect', (event, navigationUrl) => {
-    if (!isAllowedUrl(navigationUrl)) {
+    const parsedUrl = new URL(navigationUrl);
+    if (!parsedUrl.hostname.endsWith('core.placcon.com') && parsedUrl.hostname !== 'display.core.placcon.com') {
       event.preventDefault();
-      console.log('Blocking redirect to external site:', navigationUrl);
-    } else {
-      console.log('Allowing redirect to:', navigationUrl);
+      require('electron').shell.openExternal(navigationUrl);
     }
   });
 
   // Handle uncaught exceptions in renderer process
   mainWindow.webContents.on('crashed', (event) => {
     console.error('Renderer process crashed:', event);
-    // Just reload the page
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.reload();
-    }
+    // Reload the window instead of crashing the app
+    mainWindow.reload();
   });
 
-  // Handle renderer process killed
-  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
-    console.error('Page failed to load:', errorCode, errorDescription);
-    // Just reload the page after a delay
-    setTimeout(() => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.reload();
-      }
-    }, 5000);
+  // Handle unresponsive renderer
+  mainWindow.on('unresponsive', () => {
+    console.warn('Window became unresponsive');
   });
 
-  // Handle renderer process unresponsive
-  mainWindow.webContents.on('unresponsive', () => {
-    console.error('Renderer process became unresponsive');
-    // Just reload the page
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.reload();
-    }
-  });
-
-  // Start auto-reload system (2 hours)
-  startAutoReloadSystem();
-}
-
-function startAutoReloadSystem() {
-  let reloadDue = false;
-  let lastReload = Date.now();
-  const RELOAD_INTERVAL = 2 * 60 * 60 * 1000; // 2 hours
-
-  if (autoReloadInterval) {
-    clearInterval(autoReloadInterval);
-  }
-
-  autoReloadInterval = setInterval(() => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    const now = Date.now();
-    if (now - lastReload < RELOAD_INTERVAL) return;
-
-    mainWindow.webContents.executeJavaScript('window.isOnWelcomeScreen && window.isOnWelcomeScreen()')
-      .then(isWelcome => {
-        if (isWelcome) {
-          console.log('[AutoReload] 2 óra eltelt, welcome képernyőn vagyunk, reload...');
-          lastReload = Date.now();
-          mainWindow.reload();
-        } else {
-          // Jelöljük, hogy esedékes a reload, de csak akkor hajtjuk végre, ha welcome képernyőre érünk
-          reloadDue = true;
-        }
-      })
-      .catch(() => {});
-  }, 60 * 1000); // Ellenőrzés percenként
-
-  // Figyeljük, mikor érünk welcome képernyőre, ha esedékes a reload
-  mainWindow.webContents.on('did-navigate', () => {
-    if (!reloadDue) return;
-    mainWindow.webContents.executeJavaScript('window.isOnWelcomeScreen && window.isOnWelcomeScreen()')
-      .then(isWelcome => {
-        if (isWelcome) {
-          console.log('[AutoReload] Esedékes reload, most welcome képernyőn vagyunk, reload...');
-          reloadDue = false;
-          lastReload = Date.now();
-          mainWindow.reload();
-        }
-      })
-      .catch(() => {});
+  // Handle responsive renderer
+  mainWindow.on('responsive', () => {
+    console.log('Window became responsive');
   });
 }
-
 
 // Configure session for persistent storage
 function configureSession() {
@@ -448,8 +292,6 @@ function configureSession() {
     // Add any custom headers if needed
     callback({ requestHeaders: details.requestHeaders });
   });
-  
-  console.log('Session configured for stability');
 }
 
 // Get available displays (IPC handler)
@@ -491,15 +333,32 @@ app.whenReady().then(() => {
   configureSession();
   createWindow();
 
-  // Prevent system sleep
-  if (process.platform === 'darwin' || process.platform === 'win32') {
-    const id = powerSaveBlocker.start('prevent-display-sleep');
-    console.log('Power save blocker started:', id);
-  }
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+    }
+  });
 });
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
+  }
+});
+
+// Security: Prevent navigation to file:// URLs
+app.on('web-contents-created', (event, contents) => {
+  contents.on('will-navigate', (event, navigationUrl) => {
+    const parsedUrl = new URL(navigationUrl);
+    if (parsedUrl.protocol === 'file:') {
+      event.preventDefault();
+    }
+  });
+});
+
+// Handle app activation (macOS)
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow();
   }
 }); 

@@ -27,8 +27,8 @@ cp main.js main.js.backup 2>/dev/null || true
 
 # Switch to order display files
 echo -e "${YELLOW}Switching to order display configuration...${NC}"
-cp package-order-display.json package.json
-cp main-order-display.js main.js
+cp package.json package.json
+cp main.js main.js
 
 # Install dependencies if needed
 if [ ! -d "node_modules" ]; then
