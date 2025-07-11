@@ -25,7 +25,7 @@
   "author": "Placcon <info@placcon.com>",
   "license": "MIT",
   "devDependencies": {
-    "electron": "^38.0.0",
+    "electron": "^37.0.0",
     "electron-builder": "^24.9.1"
   },
   "build": {
