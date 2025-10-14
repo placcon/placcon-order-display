@@ -57,16 +57,25 @@ function removeLockFile() {
 }
 
 // Check for existing instance using both methods
-if (!gotTheLock || checkLockFile()) {
-  // Another instance is already running
-  dialog.showMessageBoxSync({
-    type: 'info',
-    title: 'Placcon Order Display',
-    message: 'Az alkalmazás már fut',
-    detail: 'A Placcon Order Display alkalmazás már fut a rendszeren. Csak egy példány futtatható egyszerre.',
-    buttons: ['OK']
+const isSecondInstance = !gotTheLock;
+
+if (isSecondInstance) {
+  // Another instance is already running (Electron's built-in lock failed)
+  // Show dialog immediately and exit
+  app.whenReady().then(() => {
+    dialog.showMessageBoxSync({
+      type: 'info',
+      title: 'Placcon Order Display',
+      message: 'Az alkalmazás már fut',
+      detail: 'A Placcon Order Display alkalmazás már fut a rendszeren. Csak egy példány futtatható egyszerre.',
+      buttons: ['OK']
+    });
   });
-  app.quit();
+  
+  // Exit immediately after dialog setup
+  setTimeout(() => {
+    process.exit(0);
+  }, 100);
 } else {
   // This is the first instance, create lock file and handle second instance attempts
   createLockFile();
@@ -422,8 +431,8 @@ ipcMain.handle('set-display', async (event, displayIndex) => {
   }
 });
 
-// App event handlers (only run if we got the singleton lock and no other instance is running)
-if (gotTheLock && !checkLockFile()) {
+// App event handlers (only run if this is not a second instance)
+if (!isSecondInstance) {
   app.whenReady().then(() => {
     configureSession();
     createWindow();
