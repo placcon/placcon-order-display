@@ -8,11 +8,69 @@ let mainWindow;
 // Singleton lock to prevent multiple instances
 const gotTheLock = app.requestSingleInstanceLock();
 
-if (!gotTheLock) {
-  // Another instance is already running, show dialog and quit
+// Additional lock file for Windows compatibility
+const lockFilePath = path.join(app.getPath('temp'), 'placcon-order-display.lock');
+
+function createLockFile() {
+  try {
+    const lockData = {
+      pid: process.pid,
+      timestamp: Date.now()
+    };
+    fs.writeFileSync(lockFilePath, JSON.stringify(lockData));
+    return true;
+  } catch (error) {
+    console.error('Error creating lock file:', error);
+    return false;
+  }
+}
+
+function checkLockFile() {
+  try {
+    if (fs.existsSync(lockFilePath)) {
+      const lockData = JSON.parse(fs.readFileSync(lockFilePath, 'utf8'));
+      // Check if the process is still running
+      try {
+        process.kill(lockData.pid, 0); // Check if process exists
+        return true; // Process is still running
+      } catch (error) {
+        // Process doesn't exist, remove stale lock file
+        fs.unlinkSync(lockFilePath);
+        return false;
+      }
+    }
+    return false;
+  } catch (error) {
+    console.error('Error checking lock file:', error);
+    return false;
+  }
+}
+
+function removeLockFile() {
+  try {
+    if (fs.existsSync(lockFilePath)) {
+      fs.unlinkSync(lockFilePath);
+    }
+  } catch (error) {
+    console.error('Error removing lock file:', error);
+  }
+}
+
+// Check for existing instance using both methods
+if (!gotTheLock || checkLockFile()) {
+  // Another instance is already running
+  dialog.showMessageBoxSync({
+    type: 'info',
+    title: 'Placcon Order Display',
+    message: 'Az alkalmazás már fut',
+    detail: 'A Placcon Order Display alkalmazás már fut a rendszeren. Csak egy példány futtatható egyszerre.',
+    buttons: ['OK']
+  });
   app.quit();
 } else {
-  // This is the first instance, handle second instance attempts
+  // This is the first instance, create lock file and handle second instance attempts
+  createLockFile();
+  
   app.on('second-instance', (event, commandLine, workingDirectory) => {
     // Someone tried to run a second instance, show dialog and focus the existing window
     if (mainWindow) {
@@ -28,6 +86,16 @@ if (!gotTheLock) {
       detail: 'A Placcon Order Display alkalmazás már fut a rendszeren. Csak egy példány futtatható egyszerre.',
       buttons: ['OK']
     });
+  });
+  
+  // Clean up lock file on app quit
+  app.on('before-quit', () => {
+    removeLockFile();
+  });
+  
+  // Clean up lock file on app closed
+  app.on('window-all-closed', () => {
+    removeLockFile();
   });
 }
 
@@ -354,8 +422,8 @@ ipcMain.handle('set-display', async (event, displayIndex) => {
   }
 });
 
-// App event handlers (only run if we got the singleton lock)
-if (gotTheLock) {
+// App event handlers (only run if we got the singleton lock and no other instance is running)
+if (gotTheLock && !checkLockFile()) {
   app.whenReady().then(() => {
     configureSession();
     createWindow();

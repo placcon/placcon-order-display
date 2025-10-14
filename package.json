@@ -1,6 +1,6 @@
 {
   "name": "placcon-order-display",
-  "version": "2.4.0-order",
+  "version": "2.4.1-order",
   "description": "Placcon Order Display System",
   "main": "main.js",
   "scripts": {
