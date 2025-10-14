@@ -1,9 +1,35 @@
-const { app, BrowserWindow, session, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, session, ipcMain, screen, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
 // Keep a global reference of the window object
 let mainWindow;
+
+// Singleton lock to prevent multiple instances
+const gotTheLock = app.requestSingleInstanceLock();
+
+if (!gotTheLock) {
+  // Another instance is already running, show dialog and quit
+  app.quit();
+} else {
+  // This is the first instance, handle second instance attempts
+  app.on('second-instance', (event, commandLine, workingDirectory) => {
+    // Someone tried to run a second instance, show dialog and focus the existing window
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+    
+    // Show dialog to inform user
+    dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Placcon Order Display',
+      message: 'Az alkalmazás már fut',
+      detail: 'A Placcon Order Display alkalmazás már fut a rendszeren. Csak egy példány futtatható egyszerre.',
+      buttons: ['OK']
+    });
+  });
+}
 
 // Settings file path
 const settingsPath = path.join(app.getPath('userData'), 'display-settings.json');
@@ -328,37 +354,39 @@ ipcMain.handle('set-display', async (event, displayIndex) => {
   }
 });
 
-// App event handlers
-app.whenReady().then(() => {
-  configureSession();
-  createWindow();
+// App event handlers (only run if we got the singleton lock)
+if (gotTheLock) {
+  app.whenReady().then(() => {
+    configureSession();
+    createWindow();
 
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow();
+      }
+    });
+  });
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
+      app.quit();
+    }
+  });
+
+  // Security: Prevent navigation to file:// URLs
+  app.on('web-contents-created', (event, contents) => {
+    contents.on('will-navigate', (event, navigationUrl) => {
+      const parsedUrl = new URL(navigationUrl);
+      if (parsedUrl.protocol === 'file:') {
+        event.preventDefault();
+      }
+    });
+  });
+
+  // Handle app activation (macOS)
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
     }
   });
-});
-
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
-});
-
-// Security: Prevent navigation to file:// URLs
-app.on('web-contents-created', (event, contents) => {
-  contents.on('will-navigate', (event, navigationUrl) => {
-    const parsedUrl = new URL(navigationUrl);
-    if (parsedUrl.protocol === 'file:') {
-      event.preventDefault();
-    }
-  });
-});
-
-// Handle app activation (macOS)
-app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
-  }
-}); 
+} 
