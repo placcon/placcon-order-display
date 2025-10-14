@@ -1,6 +1,6 @@
 {
   "name": "placcon-order-display",
-  "version": "2.4.2-order",
+  "version": "2.4.3-order",
   "description": "Placcon Order Display System",
   "main": "main.js",
   "scripts": {
@@ -83,7 +83,9 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "perMachine": false,
+      "allowElevation": false
     }
   },
   "dependencies": {

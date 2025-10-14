@@ -81,20 +81,12 @@ if (isSecondInstance) {
   createLockFile();
   
   app.on('second-instance', (event, commandLine, workingDirectory) => {
-    // Someone tried to run a second instance, show dialog and focus the existing window
+    // Someone tried to run a second instance, focus the existing window
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
     }
-    
-    // Show dialog to inform user
-    dialog.showMessageBox(mainWindow, {
-      type: 'info',
-      title: 'Placcon Order Display',
-      message: 'Az alkalmazás már fut',
-      detail: 'A Placcon Order Display alkalmazás már fut a rendszeren. Csak egy példány futtatható egyszerre.',
-      buttons: ['OK']
-    });
+    // Don't show dialog here to avoid double popup - the singleton lock already handles it
   });
   
   // Clean up lock file on app quit
