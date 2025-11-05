@@ -1,0 +1,213 @@
+name: Auto Release
+
+on:
+  push:
+    branches: [ main, master, electron-v2 ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 1.8.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  check-and-release:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: 'npm'
+
+    - name: Get version from package.json
+      id: get_version
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          VERSION="${{ github.event.inputs.version }}"
+        else
+          VERSION=$(node -p "require('./package.json').version")
+        fi
+        echo "Package.json version: $VERSION"
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+    - name: Check if release already exists
+      run: |
+        VERSION=${{ steps.get_version.outputs.version }}
+        TAG="v$VERSION"
+        echo "Checking if release for tag $TAG already exists..."
+        
+        if gh release view "$TAG" >/dev/null 2>&1; then
+          echo "❌ Release for tag $TAG already exists!"
+          echo "Please use a different version or delete the existing release first."
+          exit 1
+        else
+          echo "✅ No existing release found for tag $TAG"
+          echo "Proceeding with build and release..."
+        fi
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-all:
+    needs: check-and-release
+    strategy:
+      matrix:
+        platform: [mac, win, linux]
+        include:
+          - platform: mac
+            runner: macos-latest
+            extension: dmg
+          - platform: win
+            runner: windows-latest
+            extension: exe
+          - platform: linux
+            runner: ubuntu-latest
+            extension: deb
+    
+    runs-on: ${{ matrix.runner }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Get version from package.json
+      id: get_version
+      shell: bash
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          VERSION="${{ github.event.inputs.version }}"
+        else
+          VERSION=$(node -p "require('./package.json').version")
+        fi
+        echo "Version: $VERSION"
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+    - name: Build for ${{ matrix.platform }}
+      run: npm run build:${{ matrix.platform }}
+
+    - name: List build outputs
+      shell: bash
+      run: |
+        echo "Build outputs for ${{ matrix.platform }}:"
+        if [ -d "./dist" ]; then
+          ls -la ./dist/ || echo "Could not list dist directory"
+          find ./dist -type f 2>/dev/null | head -20 || echo "Could not find files in dist directory"
+        else
+          echo "dist directory not found"
+        fi
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: placcon-launcher-${{ matrix.platform }}
+        path: dist/
+        retention-days: 0
+
+  create-release:
+    needs: build-all
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Get version from package.json
+      id: get_version
+      shell: bash
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          VERSION="${{ github.event.inputs.version }}"
+        else
+          VERSION=$(node -p "require('./package.json').version")
+        fi
+        echo "Version: $VERSION"
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Find and rename files
+      id: renamed_files
+      shell: bash
+      run: |
+        VERSION=${{ steps.get_version.outputs.version }}
+        echo "Processing files for version: $VERSION"
+        
+        # Find and rename files
+        RENAMED_FILES=""
+        
+        # DMG file (macOS ARM64)
+        DMG_FILE=$(find artifacts -name "*.dmg" -type f | grep -E "Placcon Launcher-[0-9]+\.[0-9]+\.[0-9]+-arm64" | head -1)
+        if [ ! -z "$DMG_FILE" ]; then
+          NEW_DMG_NAME="osx-Placcon-Launcher-$VERSION-arm64.dmg"
+          NEW_DMG_PATH=$(dirname "$DMG_FILE")/$NEW_DMG_NAME
+          mv "$DMG_FILE" "$NEW_DMG_PATH"
+          RENAMED_FILES="$RENAMED_FILES $NEW_DMG_PATH"
+          echo "Renamed DMG: $NEW_DMG_NAME"
+        fi
+        
+        # EXE file (Windows Setup)
+        EXE_FILE=$(find artifacts -name "*.exe" -type f | grep -E "Placcon Launcher Setup [0-9]+\.[0-9]+\.[0-9]+\.exe$" | head -1)
+        if [ ! -z "$EXE_FILE" ]; then
+          NEW_EXE_NAME="windows-Placcon-Launcher-Setup-$VERSION.exe"
+          NEW_EXE_PATH=$(dirname "$EXE_FILE")/$NEW_EXE_NAME
+          mv "$EXE_FILE" "$NEW_EXE_PATH"
+          RENAMED_FILES="$RENAMED_FILES $NEW_EXE_PATH"
+          echo "Renamed EXE: $NEW_EXE_NAME"
+        fi
+        
+        # DEB files (Linux)
+        DEB_FILES=$(find artifacts -name "*.deb" -type f | grep -E "placcon-launcher_[0-9]+\.[0-9]+\.[0-9]+" | sort -u)
+        for DEB_FILE in $DEB_FILES; do
+          if [[ "$DEB_FILE" == *"amd64"* ]]; then
+            NEW_DEB_NAME="linux-placcon-launcher-$VERSION-amd64.deb"
+          elif [[ "$DEB_FILE" == *"arm64"* ]]; then
+            NEW_DEB_NAME="linux-placcon-launcher-$VERSION-arm64.deb"
+          else
+            NEW_DEB_NAME="linux-$(basename "$DEB_FILE")"
+          fi
+          NEW_DEB_PATH=$(dirname "$DEB_FILE")/$NEW_DEB_NAME
+          mv "$DEB_FILE" "$NEW_DEB_PATH"
+          RENAMED_FILES="$RENAMED_FILES $NEW_DEB_PATH"
+          echo "Renamed DEB: $NEW_DEB_NAME"
+        done
+        
+        echo "Final files: $RENAMED_FILES"
+        echo "files=$RENAMED_FILES" >> $GITHUB_OUTPUT
+
+    - name: Create Release
+      shell: bash
+      run: |
+        VERSION=${{ steps.get_version.outputs.version }}
+        TAG="v$VERSION"
+        
+        echo "Creating release for tag: $TAG"
+        
+        RELEASE_NOTES="Placcon Launcher $VERSION - Automated release with macOS ARM64, Windows Setup, and Linux DEB packages"
+        gh release create "$TAG" \
+          --title "Placcon Launcher $VERSION" \
+          --notes "$RELEASE_NOTES" \
+          --draft=false \
+          --prerelease=false \
+          ${{ steps.renamed_files.outputs.files }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
