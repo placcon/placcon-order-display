@@ -192,6 +192,14 @@ jobs:
         echo "=== File sizes ==="
         find artifacts -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.deb" \) -exec ls -lh {} \; | awk '{print $5, $9}' | sort
 
+    - name: Rename Windows installers
+      shell: bash
+      run: |
+        EXE_X64=$(find artifacts/order-display-win-x64 -name "*.exe" | head -1)
+        EXE_IA32=$(find artifacts/order-display-win-ia32 -name "*.exe" | head -1)
+        [ -n "$EXE_X64" ] && mv "$EXE_X64" "artifacts/order-display-win-x64/placcon-order-display-Setup-x64.exe"
+        [ -n "$EXE_IA32" ] && mv "$EXE_IA32" "artifacts/order-display-win-ia32/placcon-order-display-Setup-ia32.exe"
+
     - name: Create Release
       shell: bash
       run: |
@@ -199,8 +207,7 @@ jobs:
         TAG="v$VERSION"
         echo "Creating release for tag: $TAG"
 
-        # Csak a telepítő fájlok, unpacked mappák nélkül
-        mapfile -t FILES < <(find artifacts -type f \( -name "*.dmg" \) -o \( -type f -name "*.exe" -not -path "*/win-*-unpacked/*" -not -path "*/win-unpacked/*" \) | sort)
+        mapfile -t FILES < <(find artifacts -type f \( -name "*.exe" -o -name "*.dmg" \) | sort)
         echo "Files to upload:"
         printf '%s\n' "${FILES[@]}"
 
