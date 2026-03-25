@@ -7,7 +7,8 @@
     "start": "electron .",
     "dev": "electron . --dev",
     "build": "electron-builder",
-    "build:win": "electron-builder --win --x64 --ia32 --arm64",
+    "build:win": "electron-builder --win --x64",
+    "build:win32": "electron-builder --win --ia32",
     "build:mac": "electron-builder --mac",
     "build:linux": "electron-builder --linux",
     "build:all": "electron-builder -mwl",
@@ -46,18 +47,6 @@
           "target": "nsis",
           "arch": [
             "x64"
-          ]
-        },
-        {
-          "target": "nsis",
-          "arch": [
-            "ia32"
-          ]
-        },
-        {
-          "target": "nsis",
-          "arch": [
-            "arm64"
           ]
         }
       ],
