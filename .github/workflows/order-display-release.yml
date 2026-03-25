@@ -108,10 +108,12 @@ jobs:
     - name: List build outputs
       shell: bash
       run: |
-        echo "Build outputs for ${{ matrix.platform }}:"
+        echo "=== Build outputs for ${{ matrix.platform }} ==="
         if [ -d "./dist" ]; then
-          ls -la ./dist/ || echo "Could not list dist directory"
-          find ./dist -type f 2>/dev/null | head -20 || echo "Could not find files in dist directory"
+          echo "--- All files in dist/ ---"
+          find ./dist -type f | sort
+          echo "--- Installer files only ---"
+          find ./dist -maxdepth 1 -type f | sort
         else
           echo "dist directory not found"
         fi
@@ -120,7 +122,10 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: order-display-${{ matrix.platform }}
-        path: dist/
+        path: |
+          dist/*.exe
+          dist/*.dmg
+          dist/*.deb
         retention-days: 0
 
   create-release:
@@ -151,8 +156,14 @@ jobs:
     - name: List all artifacts
       shell: bash
       run: |
-        echo "All downloaded artifacts:"
+        echo "=== All downloaded artifact files ==="
         find artifacts -type f | sort
+        echo ""
+        echo "=== Installer files that will be uploaded to release ==="
+        find artifacts -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.deb" \) | sort
+        echo ""
+        echo "=== File sizes ==="
+        find artifacts -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.deb" \) -exec ls -lh {} \; | awk '{print $5, $9}' | sort
 
     - name: Create Release
       shell: bash
