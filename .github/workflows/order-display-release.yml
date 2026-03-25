@@ -148,73 +148,29 @@ jobs:
       with:
         path: artifacts
 
-    - name: Find and rename files
-      id: renamed_files
+    - name: List all artifacts
       shell: bash
       run: |
-        VERSION=${{ steps.get_version.outputs.version }}
-        echo "Processing order display files for version: $VERSION"
-        
-        # Find and rename files
-        RENAMED_FILES=""
-        
-        # Order display files
-        DMG_FILE=$(find artifacts -name "*.dmg" -type f | grep -E "placcon order display-[0-9]+\.[0-9]+\.[0-9]+-order-arm64" || true | head -1)
-        if [ ! -z "$DMG_FILE" ]; then
-          NEW_DMG_NAME="osx-placcon-order-display-$VERSION-arm64.dmg"
-          NEW_DMG_PATH=$(dirname "$DMG_FILE")/$NEW_DMG_NAME
-          mv "$DMG_FILE" "$NEW_DMG_PATH"
-          RENAMED_FILES="$RENAMED_FILES $NEW_DMG_PATH"
-          echo "Renamed DMG: $NEW_DMG_NAME"
-        fi
-
-        # Windows x64
-        EXE_X64=$(find artifacts -name "*.exe" -type f | { grep -E "placcon order display Setup [0-9]+\.[0-9]+\.[0-9]+-order\.exe$" || true; } | { grep -v " ia32" || true; } | { grep -v " arm64" || true; } | head -1)
-        if [ ! -z "$EXE_X64" ]; then
-          NEW_EXE_NAME="windows-placcon-order-display-Setup-$VERSION-x64.exe"
-          NEW_EXE_PATH=$(dirname "$EXE_X64")/$NEW_EXE_NAME
-          mv "$EXE_X64" "$NEW_EXE_PATH"
-          RENAMED_FILES="$RENAMED_FILES $NEW_EXE_PATH"
-          echo "Renamed EXE x64: $NEW_EXE_NAME"
-        fi
-
-        # Windows ia32 (32-bit)
-        EXE_IA32=$(find artifacts -name "*.exe" -type f | grep -E "placcon order display Setup [0-9]+\.[0-9]+\.[0-9]+-order ia32\.exe$" || true | head -1)
-        if [ ! -z "$EXE_IA32" ]; then
-          NEW_EXE_NAME="windows-placcon-order-display-Setup-$VERSION-ia32.exe"
-          NEW_EXE_PATH=$(dirname "$EXE_IA32")/$NEW_EXE_NAME
-          mv "$EXE_IA32" "$NEW_EXE_PATH"
-          RENAMED_FILES="$RENAMED_FILES $NEW_EXE_PATH"
-          echo "Renamed EXE ia32: $NEW_EXE_NAME"
-        fi
-
-        # Windows arm64
-        EXE_ARM64=$(find artifacts -name "*.exe" -type f | grep -E "placcon order display Setup [0-9]+\.[0-9]+\.[0-9]+-order arm64\.exe$" || true | head -1)
-        if [ ! -z "$EXE_ARM64" ]; then
-          NEW_EXE_NAME="windows-placcon-order-display-Setup-$VERSION-arm64.exe"
-          NEW_EXE_PATH=$(dirname "$EXE_ARM64")/$NEW_EXE_NAME
-          mv "$EXE_ARM64" "$NEW_EXE_PATH"
-          RENAMED_FILES="$RENAMED_FILES $NEW_EXE_PATH"
-          echo "Renamed EXE arm64: $NEW_EXE_NAME"
-        fi
-
-        echo "Final files: $RENAMED_FILES"
-        echo "files=$RENAMED_FILES" >> $GITHUB_OUTPUT
+        echo "All downloaded artifacts:"
+        find artifacts -type f | sort
 
     - name: Create Release
       shell: bash
       run: |
         VERSION=${{ steps.get_version.outputs.version }}
         TAG="v$VERSION"
-        
-        echo "Creating order display release for tag: $TAG"
-        
-        RELEASE_NOTES="placcon order display $VERSION - Order Display Kiosk Mode - Automated release for order display kiosk mode - Fullscreen kiosk application - Optimized for display devices"
+        echo "Creating release for tag: $TAG"
+
+        FILES=$(find artifacts -type f \( -name "*.exe" -o -name "*.dmg" \) | sort)
+        echo "Files to upload:"
+        echo "$FILES"
+
+        RELEASE_NOTES="placcon order display $VERSION - Order Display Kiosk Mode"
         gh release create "$TAG" \
           --title "placcon order display $VERSION" \
           --notes "$RELEASE_NOTES" \
           --draft=false \
           --prerelease=false \
-          ${{ steps.renamed_files.outputs.files }}
+          $FILES
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
