@@ -1,6 +1,6 @@
 {
   "name": "placcon-order-display",
-  "version": "2.5.2-order",
+  "version": "2.5.3-order",
   "description": "Placcon Order Display System",
   "main": "main.js",
   "scripts": {
@@ -25,8 +25,8 @@
   "author": "Placcon <info@placcon.com>",
   "license": "MIT",
   "devDependencies": {
-    "electron": "^37.0.0",
-    "electron-builder": "^24.9.1"
+    "electron": "^41.0.4",
+    "electron-builder": "^26.8.1"
   },
   "build": {
     "appId": "com.placcon.order-display",
@@ -102,4 +102,4 @@
   "dependencies": {
     "path": "^0.12.7"
   }
-} 
+}
