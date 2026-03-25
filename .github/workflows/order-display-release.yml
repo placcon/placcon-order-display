@@ -161,9 +161,10 @@ jobs:
         TAG="v$VERSION"
         echo "Creating release for tag: $TAG"
 
-        FILES=$(find artifacts -type f \( -name "*.exe" -o -name "*.dmg" \) | sort)
+        # Csak a telepítő fájlok, unpacked mappák nélkül
+        mapfile -t FILES < <(find artifacts -type f \( -name "*.dmg" \) -o \( -type f -name "*.exe" -not -path "*/win-*-unpacked/*" -not -path "*/win-unpacked/*" \) | sort)
         echo "Files to upload:"
-        echo "$FILES"
+        printf '%s\n' "${FILES[@]}"
 
         RELEASE_NOTES="placcon order display $VERSION - Order Display Kiosk Mode"
         gh release create "$TAG" \
@@ -171,6 +172,6 @@ jobs:
           --notes "$RELEASE_NOTES" \
           --draft=false \
           --prerelease=false \
-          $FILES
+          "${FILES[@]}"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
