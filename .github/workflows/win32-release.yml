@@ -1,0 +1,84 @@
+name: Win32 Release
+
+on:
+  push:
+    branches: [ win32 ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 2.5.5-order)'
+        required: true
+        type: string
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - name: Get version
+      id: get_version
+      shell: bash
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          VERSION="${{ github.event.inputs.version }}"
+        else
+          VERSION=$(node -p "require('./package.json').version")
+        fi
+        echo "Version: $VERSION"
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+    - name: Install dependencies
+      working-directory: win32
+      run: npm install
+
+    - name: Copy source files
+      shell: bash
+      run: |
+        cp main.js win32/main.js
+        cp preload.js win32/preload.js
+        cp -r assets win32/assets
+
+    - name: Build win32 ia32
+      working-directory: win32
+      run: npm run build
+
+    - name: List build outputs
+      shell: bash
+      run: |
+        echo "=== Build outputs ==="
+        find ./win32/dist -maxdepth 1 -type f | sort
+
+    - name: Rename installer
+      shell: bash
+      run: |
+        EXE=$(find win32/dist -maxdepth 1 -name "*.exe" | head -1)
+        mv "$EXE" "win32/dist/placcon-order-display-Setup-ia32.exe"
+        echo "Renamed to: placcon-order-display-Setup-ia32.exe"
+
+    - name: Upload to existing release
+      shell: bash
+      run: |
+        VERSION=${{ steps.get_version.outputs.version }}
+        TAG="v$VERSION"
+        echo "Uploading ia32 exe to release tag: $TAG"
+
+        gh release upload "$TAG" \
+          "win32/dist/placcon-order-display-Setup-ia32.exe" \
+          --clobber
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
