@@ -59,77 +59,88 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  build-all:
+  build-mac:
     needs: check-and-release
-    strategy:
-      matrix:
-        platform: [mac, win, linux]
-        include:
-          - platform: mac
-            runner: macos-latest
-            extension: dmg
-          - platform: win
-            runner: windows-latest
-            extension: exe
-          - platform: linux
-            runner: ubuntu-latest
-            extension: deb
-    
-    runs-on: ${{ matrix.runner }}
-    
+    runs-on: macos-latest
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
+    - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
       with:
         node-version: '24'
         cache: 'npm'
-
-    - name: Install dependencies
-      run: npm ci
-
-    - name: Get version from package.json
-      id: get_version
-      shell: bash
-      run: |
-        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-          VERSION="${{ github.event.inputs.version }}"
-        else
-          VERSION=$(node -p "require('./package.json').version")
-        fi
-        echo "Version: $VERSION"
-        echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-    - name: Build for ${{ matrix.platform }}
-      run: npm run build:${{ matrix.platform }}
-
+    - run: npm ci
+    - run: npm run build:mac
     - name: List build outputs
       shell: bash
-      run: |
-        echo "=== Build outputs for ${{ matrix.platform }} ==="
-        if [ -d "./dist" ]; then
-          echo "--- All files in dist/ ---"
-          find ./dist -type f | sort
-          echo "--- Installer files only (dist root) ---"
-          find ./dist -maxdepth 1 -type f | sort
-        else
-          echo "dist directory not found"
-        fi
-
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
+      run: find ./dist -maxdepth 1 -type f | sort
+    - uses: actions/upload-artifact@v4
       with:
-        name: placcon-launcher-${{ matrix.platform }}
-        path: |
-          dist/*.exe
-          dist/*.dmg
-          dist/*.deb
+        name: placcon-launcher-mac
+        path: dist/*.dmg
+        retention-days: 0
+
+  build-win-x64:
+    needs: check-and-release
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+        cache: 'npm'
+    - run: npm ci
+    - run: npm run build:win
+    - name: List build outputs
+      shell: bash
+      run: find ./dist -maxdepth 1 -type f | sort
+    - uses: actions/upload-artifact@v4
+      with:
+        name: placcon-launcher-win-x64
+        path: dist/*.exe
+        retention-days: 0
+
+  build-win-ia32:
+    needs: check-and-release
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+        cache: 'npm'
+    - run: npm ci
+    - run: npm run build:win32
+    - name: List build outputs
+      shell: bash
+      run: find ./dist -maxdepth 1 -type f | sort
+    - uses: actions/upload-artifact@v4
+      with:
+        name: placcon-launcher-win-ia32
+        path: dist/*.exe
+        retention-days: 0
+
+  build-linux:
+    needs: check-and-release
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+        cache: 'npm'
+    - run: npm ci
+    - run: npm run build:linux
+    - name: List build outputs
+      shell: bash
+      run: find ./dist -maxdepth 1 -type f | sort
+    - uses: actions/upload-artifact@v4
+      with:
+        name: placcon-launcher-linux
+        path: dist/*.deb
         retention-days: 0
 
   create-release:
-    needs: build-all
+    needs: [build-mac, build-win-x64, build-win-ia32, build-linux]
     runs-on: ubuntu-latest
     
     steps:
